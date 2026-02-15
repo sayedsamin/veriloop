@@ -16,7 +16,9 @@ import { scoringWorkflow } from "@/mastra/workflows/scoring"
 import { ScoringResultSchema } from "@/mastra/workflows/scoring"
 
 const MAX_PDF_SIZE_BYTES = 4 * 1024 * 1024
-const SCORING_TIMEOUT_MS = 20_000
+const SCORING_TIMEOUT_MS = 45_000
+const SCORING_TIMEOUT_RETRY_DELAY_MS = 1_200
+const SCORING_MAX_TIMEOUT_ATTEMPTS = 2
 
 type SubmitApplicationResult =
   | { success: true; score: number | null }
@@ -692,64 +694,92 @@ async function executeScoringWorkflow(
   context: { source: "submit" | "retry"; applicationId?: number; jobId?: number }
 ): Promise<ScoringExecutionResult> {
   const traceId = randomUUID()
+  const normalizedRequirements = normalizeScoringRequirements(requirements)
 
   try {
-    const run = await scoringWorkflow.createRun()
-    const normalizedRequirements = normalizeScoringRequirements(requirements)
-    logScoringDiagnostic(traceId, {
-      stage: "start",
-      source: context.source,
-      applicationId: context.applicationId ?? null,
-      jobId: context.jobId ?? null,
-      requirementsCount: Array.isArray(requirements) ? requirements.length : null,
-      resumeTextLength: resumeText.length,
-      runId: (run as { runId?: string }).runId ?? null,
-    })
-
-    const workflowResult = await withTimeout(
-      run.start({
-        inputData: {
-          resumeText,
-          requirements: normalizedRequirements,
-        },
-      }),
-      SCORING_TIMEOUT_MS,
-      "AI scoring"
-    )
-
-    if (workflowResult.status !== "success") {
+    for (let attempt = 1; attempt <= SCORING_MAX_TIMEOUT_ATTEMPTS; attempt += 1) {
+      const run = await scoringWorkflow.createRun()
       logScoringDiagnostic(traceId, {
-        stage: "workflow-non-success",
+        stage: attempt === 1 ? "start" : "retry-start",
+        attempt,
         source: context.source,
         applicationId: context.applicationId ?? null,
         jobId: context.jobId ?? null,
-        workflowStatus: workflowResult.status,
-        workflowResult: toErrorPayload(workflowResult),
+        requirementsCount: Array.isArray(requirements) ? requirements.length : null,
+        resumeTextLength: resumeText.length,
+        runId: (run as { runId?: string }).runId ?? null,
       })
-      return { ok: false, error: `Failed to score application. (trace: ${traceId})`, traceId }
-    }
 
-    const parsed = parseScoringWorkflowSuccess(workflowResult.result)
-    if (!parsed) {
-      logScoringDiagnostic(traceId, {
-        stage: "unexpected-success-shape",
-        source: context.source,
-        applicationId: context.applicationId ?? null,
-        jobId: context.jobId ?? null,
-        workflowResult: toErrorPayload(workflowResult.result),
-      })
-      return {
-        ok: false,
-        error: `Scoring workflow returned an unexpected result shape. (trace: ${traceId})`,
-        traceId,
+      try {
+        const workflowResult = await withTimeout(
+          run.start({
+            inputData: {
+              resumeText,
+              requirements: normalizedRequirements,
+            },
+          }),
+          SCORING_TIMEOUT_MS,
+          "AI scoring"
+        )
+
+        if (workflowResult.status !== "success") {
+          logScoringDiagnostic(traceId, {
+            stage: "workflow-non-success",
+            attempt,
+            source: context.source,
+            applicationId: context.applicationId ?? null,
+            jobId: context.jobId ?? null,
+            workflowStatus: workflowResult.status,
+            workflowResult: toErrorPayload(workflowResult),
+          })
+          return { ok: false, error: `Failed to score application. (trace: ${traceId})`, traceId }
+        }
+
+        const parsed = parseScoringWorkflowSuccess(workflowResult.result)
+        if (!parsed) {
+          logScoringDiagnostic(traceId, {
+            stage: "unexpected-success-shape",
+            attempt,
+            source: context.source,
+            applicationId: context.applicationId ?? null,
+            jobId: context.jobId ?? null,
+            workflowResult: toErrorPayload(workflowResult.result),
+          })
+          return {
+            ok: false,
+            error: `Scoring workflow returned an unexpected result shape. (trace: ${traceId})`,
+            traceId,
+          }
+        }
+
+        return {
+          ok: true,
+          scoringResult: enrichScoringWithEvidence(normalizeScoringScale(parsed.scoringResult), resumeText),
+          scoringMeta: parsed.scoringMeta,
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown scoring error."
+        const isTimeoutError = message.includes("timed out")
+        logScoringDiagnostic(traceId, {
+          stage: "attempt-exception",
+          attempt,
+          source: context.source,
+          applicationId: context.applicationId ?? null,
+          jobId: context.jobId ?? null,
+          isTimeoutError,
+          error: toErrorPayload(error),
+        })
+
+        if (isTimeoutError && attempt < SCORING_MAX_TIMEOUT_ATTEMPTS) {
+          await new Promise((resolve) => setTimeout(resolve, SCORING_TIMEOUT_RETRY_DELAY_MS))
+          continue
+        }
+
+        return { ok: false, error: `${toSafeApplicationError(error)} (trace: ${traceId})`, traceId }
       }
     }
 
-    return {
-      ok: true,
-      scoringResult: enrichScoringWithEvidence(normalizeScoringScale(parsed.scoringResult), resumeText),
-      scoringMeta: parsed.scoringMeta,
-    }
+    return { ok: false, error: `Failed to score application. (trace: ${traceId})`, traceId }
   } catch (error) {
     logScoringDiagnostic(traceId, {
       stage: "exception",
