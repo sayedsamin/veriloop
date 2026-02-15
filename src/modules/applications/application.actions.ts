@@ -304,6 +304,30 @@ type ScoringExecutionResult =
       traceId: string
     }
 
+type ScoringRequirementInput = {
+  requirementName?: string
+  name?: string
+  aiContext?: string
+  [key: string]: unknown
+}
+
+function normalizeScoringRequirements(requirements: unknown[]): ScoringRequirementInput[] {
+  return requirements
+    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+    .map((item) => ({
+      ...item,
+      requirementName:
+        typeof item.requirementName === "string" && item.requirementName.trim().length > 0
+          ? item.requirementName
+          : undefined,
+      name: typeof item.name === "string" && item.name.trim().length > 0 ? item.name : undefined,
+      aiContext:
+        typeof item.aiContext === "string" && item.aiContext.trim().length > 0
+          ? item.aiContext
+          : undefined,
+    }))
+}
+
 const EVIDENCE_STOP_WORDS = new Set([
   "the",
   "and",
@@ -614,7 +638,7 @@ function toErrorPayload(error: unknown, depth = 0): unknown {
       stack: error.stack,
     }
 
-    const enumerable = Object.entries(error as Record<string, unknown>)
+    const enumerable = Object.entries(error as unknown as Record<string, unknown>)
     if (enumerable.length > 0) {
       base.details = Object.fromEntries(
         enumerable.map(([key, value]) => [key, toErrorPayload(value, depth + 1)])
@@ -671,6 +695,7 @@ async function executeScoringWorkflow(
 
   try {
     const run = await scoringWorkflow.createRun()
+    const normalizedRequirements = normalizeScoringRequirements(requirements)
     logScoringDiagnostic(traceId, {
       stage: "start",
       source: context.source,
@@ -685,7 +710,7 @@ async function executeScoringWorkflow(
       run.start({
         inputData: {
           resumeText,
-          requirements,
+          requirements: normalizedRequirements,
         },
       }),
       SCORING_TIMEOUT_MS,
@@ -993,7 +1018,7 @@ export async function retryApplicationScoringAction(
 
     let nextStatus: "pending" | "rejected" = "pending"
     let nextScore: number | null = null
-    let nextAiCostData = application.aiCostData
+    let nextAiCostData: typeof applications.$inferInsert.aiCostData = application.aiCostData ?? null
     let nextAiScoreData: typeof applications.$inferInsert.aiScoreData
 
     if (scoringExecution.ok) {

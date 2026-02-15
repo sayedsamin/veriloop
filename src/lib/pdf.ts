@@ -6,7 +6,10 @@ type PdfParseModule = {
 }
 
 export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
-  let parser: { destroy: () => Promise<void> } | null = null
+  let parser: {
+    getText: () => Promise<{ text: string }>
+    destroy: () => Promise<void>
+  } | null = null
 
   try {
     const { PDFParse } = (await import("pdf-parse")) as PdfParseModule
