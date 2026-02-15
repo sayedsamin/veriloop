@@ -1,0 +1,1 @@
+ALTER TABLE "referrals" ADD COLUMN "referrer_profile" jsonb DEFAULT '{}'::jsonb NOT NULL;
