@@ -61,9 +61,14 @@ export default async function HrDashboardPage() {
     <main className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">HR Console</h1>
-        <Button asChild>
-          <Link href="/jobs/new">Create New Job</Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button asChild variant="outline">
+            <Link href="/dashboard/hr/onboarding">Onboarding Guide</Link>
+          </Button>
+          <Button asChild>
+            <Link href="/jobs/new">Create New Job</Link>
+          </Button>
+        </div>
       </div>
 
       {!result.success ? (

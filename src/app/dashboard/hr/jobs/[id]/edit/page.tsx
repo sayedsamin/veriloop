@@ -12,6 +12,8 @@ type EditJobPageProps = {
   params: Promise<{ id: string }>
 }
 
+type JobRequirementInput = CreateJobInput["requirements"][number]
+
 function clampWeight(value: number) {
   if (value < 1) {
     return 1
@@ -49,7 +51,7 @@ function normalizeRequirements(input: unknown): CreateJobInput["requirements"] {
     ]
   }
 
-  const normalized = input
+  const normalized: CreateJobInput["requirements"] = input
     .filter((item) => typeof item === "object" && item !== null)
     .map((item) => {
       const value = item as Record<string, unknown>
@@ -59,7 +61,7 @@ function normalizeRequirements(input: unknown): CreateJobInput["requirements"] {
       const isMandatoryValue = value.isMandatory ?? value.required
       const aiContextValue = value.aiContext
 
-      const category =
+      const category: JobRequirementInput["category"] =
         categoryValue === "skill" ||
         categoryValue === "experience" ||
         categoryValue === "education" ||

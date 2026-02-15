@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { BadgeCheck, BriefcaseBusiness, LayoutDashboard, Search, Users } from "lucide-react";
+import { BadgeCheck, BriefcaseBusiness, LayoutDashboard, Search, Sparkles, Users } from "lucide-react";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -25,6 +25,12 @@ function getNavItemsByRole(role: string | null | undefined): NavItem[] {
         label: "Create Job",
         description: "Define weighted requirements and thresholds.",
         icon: BriefcaseBusiness,
+      },
+      {
+        href: "/dashboard/hr/onboarding",
+        label: "HR Onboarding",
+        description: "Learn workflows, button actions, and best practices.",
+        icon: Sparkles,
       },
     ];
   }
